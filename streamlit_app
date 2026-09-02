@@ -1,0 +1,208 @@
+import streamlit as st
+import pandas as pd
+
+from scraper import search_cars
+
+
+st.set_page_config(
+    page_title="Blocket Bilskrapare",
+    page_icon="🚗",
+    layout="wide",
+)
+
+st.title("🚗 Blocket Bilskrapare")
+st.caption("Sök och jämför bilannonser från Blocket.")
+
+with st.sidebar:
+    st.header("Sökfilter")
+
+    query = st.text_input(
+        "Märke / modell",
+        placeholder="Ex. Volvo V60",
+    )
+
+    min_price = st.number_input(
+        "Minpris (kr)",
+        min_value=0,
+        value=0,
+        step=5000,
+    )
+
+    max_price = st.number_input(
+        "Maxpris (kr)",
+        min_value=0,
+        value=500000,
+        step=5000,
+    )
+
+    min_year = st.number_input(
+        "Från årsmodell",
+        min_value=1900,
+        max_value=2030,
+        value=2015,
+    )
+
+    max_year = st.number_input(
+        "Till årsmodell",
+        min_value=1900,
+        max_value=2030,
+        value=2030,
+    )
+
+    max_mileage = st.number_input(
+        "Max mil",
+        min_value=0,
+        value=20000,
+        step=1000,
+    )
+
+    max_results = st.slider(
+        "Antal annonser",
+        min_value=5,
+        max_value=100,
+        value=20,
+        step=5,
+    )
+
+    search_button = st.button(
+        "🔎 Sök bilar",
+        use_container_width=True,
+        type="primary",
+    )
+
+
+if search_button:
+    if not query.strip():
+        st.warning("Skriv exempelvis 'Volvo V60' i sökfältet.")
+        st.stop()
+
+    if min_price > max_price:
+        st.error("Minpriset kan inte vara högre än maxpriset.")
+        st.stop()
+
+    if min_year > max_year:
+        st.error("Från årsmodell kan inte vara högre än till årsmodell.")
+        st.stop()
+
+    with st.spinner("Hämtar annonser..."):
+        try:
+            cars = search_cars(
+                query=query,
+                min_price=min_price,
+                max_price=max_price,
+                min_year=min_year,
+                max_year=max_year,
+                max_mileage=max_mileage,
+                max_results=max_results,
+            )
+
+        except Exception as exc:
+            st.error(f"Ett fel uppstod: {exc}")
+            st.stop()
+
+    if not cars:
+        st.info("Inga annonser hittades.")
+        st.stop()
+
+    df = pd.DataFrame(cars)
+
+    st.success(f"Hittade {len(df)} annonser.")
+
+    # Statistik
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Antal annonser", len(df))
+
+    with col2:
+        if "price" in df and not df["price"].dropna().empty:
+            st.metric(
+                "Lägsta pris",
+                f"{int(df['price'].min()):,} kr".replace(",", " "),
+            )
+
+    with col3:
+        if "mileage" in df and not df["mileage"].dropna().empty:
+            st.metric(
+                "Lägsta miltal",
+                f"{int(df['mileage'].min()):,} mil".replace(",", " "),
+            )
+
+    st.divider()
+
+    # Sortering
+    sort_option = st.selectbox(
+        "Sortera efter",
+        [
+            "Pris – lägst först",
+            "Pris – högst först",
+            "Miltal – lägst först",
+            "Årsmodell – nyast först",
+        ],
+    )
+
+    if sort_option == "Pris – lägst först":
+        df = df.sort_values("price", na_position="last")
+
+    elif sort_option == "Pris – högst först":
+        df = df.sort_values("price", ascending=False, na_position="last")
+
+    elif sort_option == "Miltal – lägst först":
+        df = df.sort_values("mileage", na_position="last")
+
+    elif sort_option == "Årsmodell – nyast först":
+        df = df.sort_values("year", ascending=False, na_position="last")
+
+    # Visa annonser
+    for _, car in df.iterrows():
+        with st.container(border=True):
+            left, right = st.columns([4, 1])
+
+            with left:
+                title = car.get("title", "Okänd bil")
+
+                st.subheader(title)
+
+                details = []
+
+                if pd.notna(car.get("year")):
+                    details.append(f"📅 {int(car['year'])}")
+
+                if pd.notna(car.get("mileage")):
+                    details.append(f"🛞 {int(car['mileage']):,} mil")
+
+                if pd.notna(car.get("price")):
+                    details.append(
+                        f"💰 {int(car['price']):,} kr"
+                    )
+
+                if details:
+                    st.write(" • ".join(details).replace(",", " "))
+
+                if car.get("location"):
+                    st.write(f"📍 {car['location']}")
+
+            with right:
+                if car.get("url"):
+                    st.link_button(
+                        "Öppna annons",
+                        car["url"],
+                        use_container_width=True,
+                    )
+
+    # CSV-export
+    st.divider()
+
+    csv = df.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        "⬇️ Ladda ner som CSV",
+        data=csv,
+        file_name="blocket_bilar.csv",
+        mime="text/csv",
+    )
+else:
+    st.info(
+        "Välj dina filter till vänster och klicka på "
+        "**Sök bilar**."
+    )
